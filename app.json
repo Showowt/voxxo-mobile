@@ -1,0 +1,95 @@
+{
+  "expo": {
+    "name": "Entrevoz",
+    "slug": "voxxo",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "scheme": "entrevoz",
+    "userInterfaceStyle": "dark",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0A0E14"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.entrevoz.app",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSBluetoothAlwaysUsageDescription": "Entrevoz uses Bluetooth to route audio to your AirPods, Meta glasses, or other connected devices for AI coaching whispers.",
+        "NSBluetoothPeripheralUsageDescription": "Entrevoz uses Bluetooth to connect to your earbuds and smart glasses for private AI coaching.",
+        "NSSpeechRecognitionUsageDescription": "Entrevoz uses speech recognition for real-time translation and Wingman AI coaching during calls and conversations.",
+        "NSMicrophoneUsageDescription": "Entrevoz needs microphone access for voice translation, VoxNote recording, and Wingman real-time coaching.",
+        "NSCameraUsageDescription": "Entrevoz uses the camera for video calls with live translation subtitles.",
+        "UIBackgroundModes": [
+          "audio",
+          "voip"
+        ]
+      },
+      "copyright": "© 2026 MachineMind LLC",
+      "buildNumber": "2"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "package": "com.entrevoz.app",
+      "permissions": [
+        "android.permission.BLUETOOTH",
+        "android.permission.BLUETOOTH_ADMIN",
+        "android.permission.BLUETOOTH_SCAN",
+        "android.permission.BLUETOOTH_ADVERTISE",
+        "android.permission.BLUETOOTH_CONNECT",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.READ_PHONE_STATE",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.CAMERA"
+      ]
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "static",
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-speech-recognition",
+      [
+        "react-native-ble-plx",
+        {
+          "isBackgroundEnabled": true,
+          "modes": ["peripheral", "central"]
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "ios": {
+            "useFrameworks": "static"
+          }
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "b77be5c5-8cf0-4ca6-bb00-c305ce1adff7"
+      }
+    },
+    "owner": "machinemind",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/b77be5c5-8cf0-4ca6-bb00-c305ce1adff7"
+    }
+  }
+}

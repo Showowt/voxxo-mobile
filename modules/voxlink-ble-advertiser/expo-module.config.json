@@ -1,0 +1,9 @@
+{
+  "platforms": ["ios", "android"],
+  "ios": {
+    "modules": ["VoxLinkBLEAdvertiserModule"]
+  },
+  "android": {
+    "modules": ["expo.modules.voxlinkbleadvertiser.VoxLinkBLEAdvertiserModule"]
+  }
+}

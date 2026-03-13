@@ -1,0 +1,9 @@
+{
+  "platforms": ["ios", "android"],
+  "ios": {
+    "modules": ["VoxLinkBLEScannerModule"]
+  },
+  "android": {
+    "modules": ["expo.modules.voxlinkblescanner.VoxLinkBLEScannerModule"]
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "name": "voxlink-ble-scanner",
+  "version": "1.0.0",
+  "description": "Voxxo BLE Scanner native module for proximity discovery",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "author": "MachineMind",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/machinemind/voxlink-mobile"
+  },
+  "peerDependencies": {
+    "expo": "*",
+    "react": "*",
+    "react-native": "*"
+  }
+}

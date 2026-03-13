@@ -1,0 +1,46 @@
+{
+  "name": "entrevoz-mobile",
+  "version": "1.0.0",
+  "main": "index.ts",
+  "scripts": {
+    "start": "expo start",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
+    "web": "expo start --web"
+  },
+  "dependencies": {
+    "@expo/metro-runtime": "~55.0.6",
+    "@react-native-async-storage/async-storage": "2.2.0",
+    "@supabase/supabase-js": "^2.99.0",
+    "buffer": "^6.0.3",
+    "expo": "~55.0.5",
+    "expo-build-properties": "^55.0.9",
+    "expo-clipboard": "^55.0.8",
+    "expo-constants": "~55.0.7",
+    "expo-dev-client": "~55.0.16",
+    "expo-device": "^55.0.9",
+    "expo-haptics": "~55.0.8",
+    "expo-linking": "~55.0.7",
+    "expo-router": "~55.0.5",
+    "expo-speech": "^55.0.8",
+    "expo-speech-recognition": "^3.1.1",
+    "expo-status-bar": "~55.0.4",
+    "expo-updates": "~55.0.13",
+    "react": "19.2.0",
+    "react-native": "0.83.2",
+    "react-native-ble-plx": "^3.2.1",
+    "react-native-gesture-handler": "~2.30.0",
+    "react-native-reanimated": "4.2.1",
+    "react-native-safe-area-context": "~5.6.2",
+    "react-native-screens": "~4.23.0",
+    "react-native-web": "^0.21.2",
+    "zustand": "^5.0.11"
+  },
+  "devDependencies": {
+    "@types/react": "~19.2.2",
+    "babel-plugin-module-resolver": "^5.0.2",
+    "babel-preset-expo": "^55.0.10",
+    "typescript": "~5.9.2"
+  },
+  "private": true
+}
