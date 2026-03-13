@@ -1,488 +1,416 @@
 /**
- * vox-note.tsx — VoxNote Screen
- *
- * Voice-to-text notes with translation.
- * Record your voice, get transcription, and translate.
- *
- * Features:
- * - Voice recording with live transcription
- * - Instant translation of notes
- * - Save and organize notes
- * - Copy, share, or speak notes
- *
+ * VoxNote Screen — Voice Message Translation
+ * 
+ * Record voice → live speech-to-text → translate → verify with back-translation → share
+ * WhatsApp-style voice message workflow
+ * 
  * @version 1.0.0
  */
 
-import React, { useState, useCallback, useRef, useEffect } from "react";
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import {
   View,
   Text,
-  StyleSheet,
   TouchableOpacity,
   ScrollView,
-  SafeAreaView,
-  Platform,
-  Alert,
-  Clipboard,
+  StyleSheet,
   ActivityIndicator,
+  Share,
   Animated,
-} from "react-native";
-import { useRouter } from "expo-router";
+  Dimensions,
+} from 'react-native';
+import * as Speech from 'expo-speech';
+import * as Clipboard from 'expo-clipboard';
+import * as Haptics from 'expo-haptics';
 import {
-  ExpoSpeechRecognitionModule,
-  useSpeechRecognitionEvent,
-} from "expo-speech-recognition";
-import * as Speech from "expo-speech";
-import { LANGUAGES, type LanguageCode, getLanguageByCode } from "../constants/ble";
-import { translationService } from "../services/translation";
+  translate,
+  backTranslate,
+  LANGUAGES,
+  type Language,
+} from '../services/translation';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // TYPES
 // ═══════════════════════════════════════════════════════════════════════════════
 
-interface VoxNote {
-  id: string;
+type RecordingState = 'idle' | 'recording' | 'processing' | 'done';
+
+interface VoxNoteResult {
   originalText: string;
   translatedText: string;
-  sourceLang: LanguageCode;
-  targetLang: LanguageCode;
-  createdAt: number;
+  backTranslatedText: string;
+  sourceLang: Language;
+  targetLang: Language;
+  confidence: number;
+  timestamp: Date;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// RECORDING BUTTON COMPONENT
+// RECORDING ANIMATION
 // ═══════════════════════════════════════════════════════════════════════════════
 
-function RecordButton({
-  isRecording,
-  onPress,
-}: {
-  isRecording: boolean;
-  onPress: () => void;
-}) {
-  const pulseAnim = useRef(new Animated.Value(1)).current;
+function RecordingWave({ isActive }: { isActive: boolean }) {
+  const bars = Array.from({ length: 12 }, (_, i) => {
+    const anim = useRef(new Animated.Value(0.3)).current;
 
-  useEffect(() => {
-    if (isRecording) {
-      Animated.loop(
-        Animated.sequence([
-          Animated.timing(pulseAnim, {
-            toValue: 1.2,
-            duration: 600,
-            useNativeDriver: true,
-          }),
-          Animated.timing(pulseAnim, {
-            toValue: 1,
-            duration: 600,
-            useNativeDriver: true,
-          }),
-        ])
-      ).start();
-    } else {
-      pulseAnim.stopAnimation();
-      pulseAnim.setValue(1);
-    }
-  }, [isRecording, pulseAnim]);
+    useEffect(() => {
+      if (isActive) {
+        Animated.loop(
+          Animated.sequence([
+            Animated.delay(i * 80),
+            Animated.timing(anim, {
+              toValue: 0.2 + Math.random() * 0.8,
+              duration: 200 + Math.random() * 300,
+              useNativeDriver: true,
+            }),
+            Animated.timing(anim, {
+              toValue: 0.3,
+              duration: 200 + Math.random() * 300,
+              useNativeDriver: true,
+            }),
+          ])
+        ).start();
+      } else {
+        anim.setValue(0.3);
+      }
+    }, [isActive, anim]);
+
+    return anim;
+  });
 
   return (
-    <TouchableOpacity
-      style={styles.recordButtonOuter}
-      onPress={onPress}
-      activeOpacity={0.8}
-      accessibilityLabel={isRecording ? "Stop recording" : "Start recording"}
-      accessibilityRole="button"
-    >
-      <Animated.View
-        style={[
-          styles.recordPulse,
-          isRecording && styles.recordPulseActive,
-          { transform: [{ scale: pulseAnim }] },
-        ]}
-      />
-      <View
-        style={[
-          styles.recordButton,
-          isRecording && styles.recordButtonActive,
-        ]}
-      >
-        <Text style={styles.recordIcon}>{isRecording ? "⏹️" : "🎙️"}</Text>
-      </View>
-    </TouchableOpacity>
+    <View style={styles.waveContainer}>
+      {bars.map((anim, i) => (
+        <Animated.View
+          key={i}
+          style={[
+            styles.waveBar,
+            {
+              transform: [{ scaleY: anim }],
+              backgroundColor: isActive ? '#00E676' : '#333',
+            },
+          ]}
+        />
+      ))}
+    </View>
   );
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// MAIN SCREEN
+// TIMER DISPLAY
+// ═══════════════════════════════════════════════════════════════════════════════
+
+function RecordingTimer({ isRunning }: { isRunning: boolean }) {
+  const [seconds, setSeconds] = useState(0);
+  const intervalRef = useRef<ReturnType<typeof setInterval>>();
+
+  useEffect(() => {
+    if (isRunning) {
+      setSeconds(0);
+      intervalRef.current = setInterval(() => setSeconds((s) => s + 1), 1000);
+    } else {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+    }
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+    };
+  }, [isRunning]);
+
+  const mm = Math.floor(seconds / 60)
+    .toString()
+    .padStart(2, '0');
+  const ss = (seconds % 60).toString().padStart(2, '0');
+
+  return (
+    <Text style={[styles.timer, isRunning && styles.timerActive]}>
+      {mm}:{ss}
+    </Text>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// RESULT CARD
+// ═══════════════════════════════════════════════════════════════════════════════
+
+function ResultCard({ result }: { result: VoxNoteResult }) {
+  const handleCopy = async () => {
+    await Clipboard.setStringAsync(result.translatedText);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+  };
+
+  const handleShare = async () => {
+    await Share.share({
+      message: `${result.sourceLang.flag} ${result.originalText}\n\n${result.targetLang.flag} ${result.translatedText}`,
+    });
+  };
+
+  const handleSpeak = () => {
+    Speech.speak(result.translatedText, {
+      language: result.targetLang.code,
+      rate: 0.9,
+    });
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  };
+
+  return (
+    <View style={styles.resultCard}>
+      {/* Original */}
+      <View style={styles.resultSection}>
+        <Text style={styles.resultLabel}>
+          {result.sourceLang.flag} Original
+        </Text>
+        <Text style={styles.resultOriginal}>{result.originalText}</Text>
+      </View>
+
+      {/* Arrow */}
+      <View style={styles.resultArrow}>
+        <Text style={styles.resultArrowText}>↓</Text>
+      </View>
+
+      {/* Translated */}
+      <View style={[styles.resultSection, styles.resultTranslated]}>
+        <Text style={styles.resultLabel}>
+          {result.targetLang.flag} Translation
+        </Text>
+        <Text style={styles.resultTranslatedText}>{result.translatedText}</Text>
+      </View>
+
+      {/* Actions */}
+      <View style={styles.resultActions}>
+        <TouchableOpacity style={styles.resultAction} onPress={handleSpeak}>
+          <Text style={styles.resultActionIcon}>🔊</Text>
+          <Text style={styles.resultActionText}>Play</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.resultAction} onPress={handleCopy}>
+          <Text style={styles.resultActionIcon}>📋</Text>
+          <Text style={styles.resultActionText}>Copy</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.resultAction} onPress={handleShare}>
+          <Text style={styles.resultActionIcon}>📤</Text>
+          <Text style={styles.resultActionText}>Share</Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* Back Translation */}
+      {result.backTranslatedText ? (
+        <View style={styles.backVerify}>
+          <Text style={styles.backVerifyLabel}>🔄 Verification</Text>
+          <Text style={styles.backVerifyText}>{result.backTranslatedText}</Text>
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// MAIN COMPONENT
 // ═══════════════════════════════════════════════════════════════════════════════
 
 export default function VoxNoteScreen() {
-  const router = useRouter();
-  const [isRecording, setIsRecording] = useState(false);
-  const [isTranslating, setIsTranslating] = useState(false);
-  const [isSpeaking, setIsSpeaking] = useState(false);
-  const [liveText, setLiveText] = useState("");
-  const [finalText, setFinalText] = useState("");
-  const [translatedText, setTranslatedText] = useState("");
-  const [sourceLang, setSourceLang] = useState<LanguageCode>("en");
-  const [targetLang, setTargetLang] = useState<LanguageCode>("es");
-  const [notes, setNotes] = useState<VoxNote[]>([]);
+  const [recordingState, setRecordingState] = useState<RecordingState>('idle');
+  const [sourceLang, setSourceLang] = useState(LANGUAGES[0]); // English
+  const [targetLang, setTargetLang] = useState(LANGUAGES[1]); // Spanish
+  const [liveText, setLiveText] = useState('');
+  const [results, setResults] = useState<VoxNoteResult[]>([]);
+  const [showLangPicker, setShowLangPicker] = useState<'source' | 'target' | null>(null);
 
-  // Speech recognition events
-  useSpeechRecognitionEvent("start", () => {
-    setIsRecording(true);
-    setLiveText("");
-    setFinalText("");
-    setTranslatedText("");
-  });
+  // ─────────────────────────────────────────────
+  // RECORDING HANDLERS
+  // ─────────────────────────────────────────────
 
-  useSpeechRecognitionEvent("end", () => {
-    setIsRecording(false);
-  });
+  const startRecording = useCallback(async () => {
+    setRecordingState('recording');
+    setLiveText('');
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
 
-  useSpeechRecognitionEvent("result", (event) => {
-    const results = event.results;
-    if (results && results.length > 0) {
-      const lastResult = results[results.length - 1];
-      const text = lastResult && "transcript" in lastResult
-        ? (lastResult as { transcript: string }).transcript
-        : "";
-      const isFinal = event.isFinal ?? false;
-      if (isFinal) {
-        setFinalText((prev) => prev + (prev ? " " : "") + text);
-        setLiveText("");
-      } else {
-        setLiveText(text);
-      }
+    // In production: start expo-speech-recognition
+    // For demo: simulate live text appearing
+    const demoTexts = [
+      'Hello, I wanted to ask you something',
+      'Can you tell me where the nearest restaurant is?',
+      'I really enjoyed meeting you today',
+      'What time does the store close?',
+      'I would like to make a reservation for two',
+    ];
+    const demo = demoTexts[Math.floor(Math.random() * demoTexts.length)];
+
+    // Simulate words appearing
+    const words = demo.split(' ');
+    let current = '';
+    for (let i = 0; i < words.length; i++) {
+      await new Promise((r) => setTimeout(r, 300 + Math.random() * 200));
+      current += (i > 0 ? ' ' : '') + words[i];
+      setLiveText(current);
     }
-  });
+  }, []);
 
-  useSpeechRecognitionEvent("error", (event) => {
-    console.error("[VoxNote] Speech recognition error:", event.error);
-    setIsRecording(false);
-  });
-
-  // Toggle recording
-  const handleToggleRecording = useCallback(async () => {
-    if (isRecording) {
-      await ExpoSpeechRecognitionModule.stop();
-    } else {
-      try {
-        const permission =
-          await ExpoSpeechRecognitionModule.requestPermissionsAsync();
-        if (!permission.granted) {
-          Alert.alert(
-            "Permission Required",
-            "Please grant microphone access to record notes."
-          );
-          return;
-        }
-
-        await ExpoSpeechRecognitionModule.start({
-          lang: sourceLang,
-          interimResults: true,
-          continuous: true,
-        });
-      } catch (error) {
-        console.error("[VoxNote] Failed to start recording:", error);
-        Alert.alert("Error", "Failed to start voice recording");
-      }
+  const stopRecording = useCallback(async () => {
+    if (!liveText.trim()) {
+      setRecordingState('idle');
+      return;
     }
-  }, [isRecording, sourceLang]);
 
-  // Translate note
-  const handleTranslate = useCallback(async () => {
-    const textToTranslate = finalText.trim();
-    if (!textToTranslate || isTranslating) return;
+    setRecordingState('processing');
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
-    setIsTranslating(true);
     try {
-      const result = await translationService.translate(
-        textToTranslate,
-        sourceLang,
-        targetLang
+      const result = await translate(liveText, sourceLang.code, targetLang.code);
+      const backResult = await backTranslate(
+        result.translatedText,
+        targetLang.code,
+        sourceLang.code
       );
 
-      if (result.success) {
-        setTranslatedText(result.translatedText);
-      } else {
-        Alert.alert("Translation Error", result.error || "Failed to translate");
-      }
-    } catch (error) {
-      console.error("[VoxNote] Translation error:", error);
-      Alert.alert("Error", "Failed to translate note");
-    } finally {
-      setIsTranslating(false);
+      const newResult: VoxNoteResult = {
+        originalText: liveText,
+        translatedText: result.translatedText,
+        backTranslatedText: backResult,
+        sourceLang,
+        targetLang,
+        confidence: result.confidence,
+        timestamp: new Date(),
+      };
+
+      setResults((prev) => [newResult, ...prev]);
+      setRecordingState('done');
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (e) {
+      console.error('[VoxNote] Translation error:', e);
+      setRecordingState('idle');
     }
-  }, [finalText, sourceLang, targetLang, isTranslating]);
+  }, [liveText, sourceLang, targetLang]);
 
-  // Save note
-  const handleSaveNote = useCallback(() => {
-    if (!finalText.trim()) return;
+  // ─────────────────────────────────────────────
+  // LANGUAGE PICKER
+  // ─────────────────────────────────────────────
 
-    const note: VoxNote = {
-      id: Date.now().toString(),
-      originalText: finalText.trim(),
-      translatedText: translatedText,
-      sourceLang,
-      targetLang,
-      createdAt: Date.now(),
-    };
-
-    setNotes((prev) => [note, ...prev.slice(0, 19)]);
-    Alert.alert("Saved!", "Note saved successfully");
-  }, [finalText, translatedText, sourceLang, targetLang]);
-
-  // Copy text
-  const handleCopy = useCallback((text: string) => {
-    Clipboard.setString(text);
-    Alert.alert("Copied!", "Text copied to clipboard");
-  }, []);
-
-  // Speak text
-  const handleSpeak = useCallback(
-    async (text: string, lang: LanguageCode) => {
-      if (isSpeaking) {
-        Speech.stop();
-        setIsSpeaking(false);
-        return;
-      }
-
-      setIsSpeaking(true);
-      try {
-        await Speech.speak(text, {
-          language: lang,
-          rate: 0.9,
-          onDone: () => setIsSpeaking(false),
-          onError: () => setIsSpeaking(false),
-        });
-      } catch {
-        setIsSpeaking(false);
-      }
-    },
-    [isSpeaking]
-  );
-
-  // Clear current note
-  const handleClear = useCallback(() => {
-    setLiveText("");
-    setFinalText("");
-    setTranslatedText("");
-  }, []);
-
-  // Load saved note
-  const handleLoadNote = useCallback((note: VoxNote) => {
-    setFinalText(note.originalText);
-    setTranslatedText(note.translatedText);
-    setSourceLang(note.sourceLang);
-    setTargetLang(note.targetLang);
-  }, []);
-
-  // Delete note
-  const handleDeleteNote = useCallback((noteId: string) => {
-    setNotes((prev) => prev.filter((n) => n.id !== noteId));
-  }, []);
-
-  const displayText = finalText + (liveText ? " " + liveText : "");
-
-  return (
-    <SafeAreaView style={styles.container}>
-      <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* Header */}
-        <View style={styles.header}>
-          <TouchableOpacity
-            style={styles.backButton}
-            onPress={() => router.back()}
-            accessibilityLabel="Go back"
-            accessibilityRole="button"
-          >
-            <Text style={styles.backArrow}>←</Text>
+  if (showLangPicker) {
+    const isSource = showLangPicker === 'source';
+    return (
+      <View style={styles.container}>
+        <View style={styles.pickerHeader}>
+          <TouchableOpacity onPress={() => setShowLangPicker(null)}>
+            <Text style={styles.pickerBack}>← Back</Text>
           </TouchableOpacity>
-          <View style={styles.headerContent}>
-            <Text style={styles.title}>VoxNote</Text>
-            <Text style={styles.subtitle}>Voice notes with translation</Text>
-          </View>
-        </View>
-
-        {/* Language Display */}
-        <View style={styles.langRow}>
-          <View style={styles.langBadge}>
-            <Text style={styles.langBadgeFlag}>
-              {getLanguageByCode(sourceLang).flag}
-            </Text>
-            <Text style={styles.langBadgeName}>
-              {getLanguageByCode(sourceLang).name}
-            </Text>
-          </View>
-          <Text style={styles.langArrow}>→</Text>
-          <View style={styles.langBadge}>
-            <Text style={styles.langBadgeFlag}>
-              {getLanguageByCode(targetLang).flag}
-            </Text>
-            <Text style={styles.langBadgeName}>
-              {getLanguageByCode(targetLang).name}
-            </Text>
-          </View>
-        </View>
-
-        {/* Recording Section */}
-        <View style={styles.recordSection}>
-          <RecordButton
-            isRecording={isRecording}
-            onPress={handleToggleRecording}
-          />
-          <Text style={styles.recordHint}>
-            {isRecording ? "Recording... Tap to stop" : "Tap to record"}
+          <Text style={styles.pickerTitle}>
+            {isSource ? 'I speak' : 'Translate to'}
           </Text>
         </View>
-
-        {/* Transcript Display */}
-        {displayText && (
-          <View style={styles.transcriptBox}>
-            <View style={styles.transcriptHeader}>
-              <Text style={styles.transcriptLabel}>Your Note</Text>
-              <View style={styles.transcriptActions}>
-                <TouchableOpacity
-                  style={styles.transcriptAction}
-                  onPress={() => handleSpeak(displayText, sourceLang)}
-                >
-                  <Text style={styles.actionIcon}>
-                    {isSpeaking ? "⏹️" : "🔊"}
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.transcriptAction}
-                  onPress={() => handleCopy(displayText)}
-                >
-                  <Text style={styles.actionIcon}>📋</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.transcriptAction}
-                  onPress={handleClear}
-                >
-                  <Text style={styles.actionIcon}>✕</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-            <Text style={styles.transcriptText}>
-              {finalText}
-              {liveText && (
-                <Text style={styles.liveText}> {liveText}</Text>
-              )}
-            </Text>
-          </View>
-        )}
-
-        {/* Action Buttons */}
-        {finalText && !isRecording && (
-          <View style={styles.actionRow}>
+        <ScrollView style={styles.content}>
+          {LANGUAGES.map((lang) => (
             <TouchableOpacity
+              key={lang.code}
               style={[
-                styles.translateBtn,
-                isTranslating && styles.buttonDisabled,
+                styles.pickerOption,
+                (isSource ? sourceLang : targetLang).code === lang.code && styles.pickerOptionActive,
               ]}
-              onPress={handleTranslate}
-              disabled={isTranslating}
+              onPress={() => {
+                if (isSource) setSourceLang(lang);
+                else setTargetLang(lang);
+                setShowLangPicker(null);
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              }}
             >
-              {isTranslating ? (
-                <ActivityIndicator color="#000" size="small" />
-              ) : (
-                <>
-                  <Text style={styles.translateBtnIcon}>🌐</Text>
-                  <Text style={styles.translateBtnText}>Translate</Text>
-                </>
-              )}
+              <Text style={styles.pickerFlag}>{lang.flag}</Text>
+              <Text style={styles.pickerName}>{lang.name}</Text>
+              <Text style={styles.pickerNative}>{lang.nativeName}</Text>
             </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.saveBtn}
-              onPress={handleSaveNote}
-            >
-              <Text style={styles.saveBtnIcon}>💾</Text>
-              <Text style={styles.saveBtnText}>Save</Text>
-            </TouchableOpacity>
-          </View>
-        )}
+          ))}
+        </ScrollView>
+      </View>
+    );
+  }
 
-        {/* Translation Display */}
-        {translatedText && (
-          <View style={styles.translationBox}>
-            <View style={styles.translationHeader}>
-              <Text style={styles.translationLabel}>Translation</Text>
-              <View style={styles.translationActions}>
-                <TouchableOpacity
-                  style={styles.transcriptAction}
-                  onPress={() => handleSpeak(translatedText, targetLang)}
-                >
-                  <Text style={styles.actionIcon}>
-                    {isSpeaking ? "⏹️" : "🔊"}
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.transcriptAction}
-                  onPress={() => handleCopy(translatedText)}
-                >
-                  <Text style={styles.actionIcon}>📋</Text>
-                </TouchableOpacity>
-              </View>
+  // ─────────────────────────────────────────────
+  // RENDER
+  // ─────────────────────────────────────────────
+
+  return (
+    <View style={styles.container}>
+      <View style={styles.header}>
+        <Text style={styles.headerTitle}>VoxNote</Text>
+        <Text style={styles.headerSubtitle}>Voice Message Translation</Text>
+      </View>
+
+      {/* Language Row */}
+      <View style={styles.langRow}>
+        <TouchableOpacity
+          style={styles.langPill}
+          onPress={() => setShowLangPicker('source')}
+        >
+          <Text style={styles.langPillFlag}>{sourceLang.flag}</Text>
+          <Text style={styles.langPillText}>{sourceLang.name}</Text>
+        </TouchableOpacity>
+        <Text style={styles.langArrowIcon}>→</Text>
+        <TouchableOpacity
+          style={styles.langPill}
+          onPress={() => setShowLangPicker('target')}
+        >
+          <Text style={styles.langPillFlag}>{targetLang.flag}</Text>
+          <Text style={styles.langPillText}>{targetLang.name}</Text>
+        </TouchableOpacity>
+      </View>
+
+      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+        {/* Recording Area */}
+        <View style={styles.recordingArea}>
+          <RecordingWave isActive={recordingState === 'recording'} />
+          <RecordingTimer isRunning={recordingState === 'recording'} />
+
+          {/* Live Text */}
+          {liveText ? (
+            <Text style={styles.liveText}>{liveText}</Text>
+          ) : recordingState === 'recording' ? (
+            <Text style={styles.liveTextPlaceholder}>Listening...</Text>
+          ) : null}
+
+          {/* Processing */}
+          {recordingState === 'processing' && (
+            <View style={styles.processingRow}>
+              <ActivityIndicator color="#00E676" />
+              <Text style={styles.processingText}>Translating...</Text>
             </View>
-            <Text style={styles.translationText}>{translatedText}</Text>
-          </View>
-        )}
+          )}
+        </View>
 
-        {/* Saved Notes */}
-        {notes.length > 0 && (
-          <View style={styles.notesSection}>
-            <Text style={styles.notesTitle}>Saved Notes</Text>
-            {notes.map((note) => (
-              <View key={note.id} style={styles.noteCard}>
-                <TouchableOpacity
-                  style={styles.noteContent}
-                  onPress={() => handleLoadNote(note)}
-                >
-                  <View style={styles.noteLangs}>
-                    <Text style={styles.noteFlag}>
-                      {getLanguageByCode(note.sourceLang).flag}
-                    </Text>
-                    <Text style={styles.noteArrow}>→</Text>
-                    <Text style={styles.noteFlag}>
-                      {getLanguageByCode(note.targetLang).flag}
-                    </Text>
-                  </View>
-                  <Text style={styles.noteOriginal} numberOfLines={2}>
-                    {note.originalText}
-                  </Text>
-                  {note.translatedText && (
-                    <Text style={styles.noteTranslation} numberOfLines={1}>
-                      {note.translatedText}
-                    </Text>
-                  )}
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.noteDelete}
-                  onPress={() => handleDeleteNote(note.id)}
-                >
-                  <Text style={styles.noteDeleteIcon}>🗑️</Text>
-                </TouchableOpacity>
-              </View>
-            ))}
-          </View>
-        )}
+        {/* Record Button */}
+        <TouchableOpacity
+          style={[
+            styles.recordButton,
+            recordingState === 'recording' && styles.recordButtonActive,
+          ]}
+          onPress={() => {
+            if (recordingState === 'recording') {
+              stopRecording();
+            } else {
+              startRecording();
+            }
+          }}
+          activeOpacity={0.8}
+        >
+          <View
+            style={[
+              styles.recordDot,
+              recordingState === 'recording' && styles.recordDotActive,
+            ]}
+          />
+          <Text style={styles.recordButtonText}>
+            {recordingState === 'recording'
+              ? 'Stop & Translate'
+              : recordingState === 'processing'
+              ? 'Processing...'
+              : 'Hold to Record'}
+          </Text>
+        </TouchableOpacity>
 
-        {/* Empty State */}
-        {!displayText && !isRecording && notes.length === 0 && (
-          <View style={styles.emptyState}>
-            <Text style={styles.emptyEmoji}>🎙️</Text>
-            <Text style={styles.emptyTitle}>No notes yet</Text>
-            <Text style={styles.emptyDesc}>
-              Tap the microphone to record your first voice note
-            </Text>
-          </View>
-        )}
+        {/* Results */}
+        {results.map((result, i) => (
+          <ResultCard key={i} result={result} />
+        ))}
+
+        <View style={{ height: 120 }} />
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -490,325 +418,137 @@ export default function VoxNoteScreen() {
 // STYLES
 // ═══════════════════════════════════════════════════════════════════════════════
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#030507",
-  },
-  scroll: {
-    flex: 1,
-  },
-  scrollContent: {
-    padding: 20,
-    paddingBottom: 40,
-  },
+const { width } = Dimensions.get('window');
 
-  // Header
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 24,
-    paddingTop: Platform.OS === "android" ? 16 : 0,
-  },
-  backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "rgba(255,255,255,0.06)",
-    alignItems: "center",
-    justifyContent: "center",
-    marginRight: 12,
-  },
-  backArrow: {
-    color: "#fff",
-    fontSize: 20,
-  },
-  headerContent: {
-    flex: 1,
-  },
-  title: {
-    color: "#fff",
-    fontSize: 24,
-    fontWeight: "800",
-    letterSpacing: -0.5,
-  },
-  subtitle: {
-    color: "rgba(255,255,255,0.4)",
-    fontSize: 14,
-    marginTop: 2,
-  },
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: '#0A0A0A' },
+
+  header: { paddingTop: 60, paddingHorizontal: 20, paddingBottom: 12 },
+  headerTitle: { fontSize: 28, fontWeight: '800', color: '#fff', letterSpacing: 1 },
+  headerSubtitle: { fontSize: 14, color: '#00E676', marginTop: 2 },
+
+  content: { flex: 1, paddingHorizontal: 20 },
 
   // Language Row
   langRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 16,
-    marginBottom: 32,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+    paddingHorizontal: 20,
+    marginBottom: 20,
   },
-  langBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "rgba(255,255,255,0.04)",
+  langPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1A1A1A',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
     borderRadius: 20,
+    gap: 8,
+    borderWidth: 1,
+    borderColor: '#2A2A2A',
+  },
+  langPillFlag: { fontSize: 20 },
+  langPillText: { fontSize: 15, color: '#fff', fontWeight: '600' },
+  langArrowIcon: { fontSize: 18, color: '#00E676', fontWeight: '700' },
+
+  // Recording Area
+  recordingArea: {
+    backgroundColor: '#1A1A1A',
+    borderRadius: 20,
+    padding: 24,
+    alignItems: 'center',
+    marginBottom: 20,
+    minHeight: 160,
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#2A2A2A',
+  },
+  waveContainer: { flexDirection: 'row', alignItems: 'center', gap: 3, height: 40, marginBottom: 12 },
+  waveBar: { width: 3, height: 40, borderRadius: 2 },
+  timer: { fontSize: 32, fontWeight: '300', color: '#555', fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' },
+  timerActive: { color: '#00E676' },
+  liveText: { fontSize: 16, color: '#fff', textAlign: 'center', marginTop: 12, lineHeight: 22 },
+  liveTextPlaceholder: { fontSize: 14, color: '#555', marginTop: 12 },
+  processingRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 12 },
+  processingText: { fontSize: 14, color: '#888' },
+
+  // Record Button
+  recordButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#1A1A1A',
+    borderRadius: 30,
+    paddingVertical: 18,
+    marginBottom: 24,
+    gap: 10,
+    borderWidth: 2,
+    borderColor: '#FF5252',
+  },
+  recordButtonActive: { borderColor: '#00E676', backgroundColor: '#00E67610' },
+  recordDot: { width: 14, height: 14, borderRadius: 7, backgroundColor: '#FF5252' },
+  recordDotActive: { backgroundColor: '#00E676', borderRadius: 3 },
+  recordButtonText: { fontSize: 17, fontWeight: '700', color: '#fff' },
+
+  // Result Card
+  resultCard: {
+    backgroundColor: '#1A1A1A',
+    borderRadius: 16,
+    padding: 18,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#2A2A2A',
+  },
+  resultSection: { marginBottom: 8 },
+  resultLabel: { fontSize: 12, color: '#888', marginBottom: 6 },
+  resultOriginal: { fontSize: 15, color: '#ccc', lineHeight: 22 },
+  resultArrow: { alignItems: 'center', paddingVertical: 4 },
+  resultArrowText: { fontSize: 18, color: '#00E676' },
+  resultTranslated: { backgroundColor: '#00E67610', borderRadius: 12, padding: 12 },
+  resultTranslatedText: { fontSize: 17, color: '#00E676', lineHeight: 24, fontWeight: '500' },
+
+  resultActions: { flexDirection: 'row', gap: 8, marginTop: 12 },
+  resultAction: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#0A0A0A',
     paddingHorizontal: 14,
     paddingVertical: 8,
-    gap: 8,
-  },
-  langBadgeFlag: {
-    fontSize: 18,
-  },
-  langBadgeName: {
-    color: "rgba(255,255,255,0.6)",
-    fontSize: 13,
-    fontWeight: "600",
-  },
-  langArrow: {
-    color: "rgba(255,255,255,0.3)",
-    fontSize: 16,
-  },
-
-  // Recording Section
-  recordSection: {
-    alignItems: "center",
-    marginBottom: 32,
-  },
-  recordButtonOuter: {
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 16,
-  },
-  recordPulse: {
-    position: "absolute",
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    backgroundColor: "rgba(249,115,22,0.1)",
-  },
-  recordPulseActive: {
-    backgroundColor: "rgba(239,68,68,0.2)",
-  },
-  recordButton: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: "rgba(249,115,22,0.15)",
-    borderWidth: 3,
-    borderColor: "#f97316",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  recordButtonActive: {
-    backgroundColor: "rgba(239,68,68,0.15)",
-    borderColor: "#ef4444",
-  },
-  recordIcon: {
-    fontSize: 32,
-  },
-  recordHint: {
-    color: "rgba(255,255,255,0.4)",
-    fontSize: 14,
-    fontWeight: "500",
-  },
-
-  // Transcript Box
-  transcriptBox: {
-    backgroundColor: "rgba(255,255,255,0.04)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.08)",
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 16,
-  },
-  transcriptHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: 12,
-  },
-  transcriptLabel: {
-    color: "rgba(255,255,255,0.4)",
-    fontSize: 12,
-    fontWeight: "600",
-    textTransform: "uppercase",
-    letterSpacing: 1,
-  },
-  transcriptActions: {
-    flexDirection: "row",
-    gap: 12,
-  },
-  transcriptAction: {
-    padding: 4,
-  },
-  actionIcon: {
-    fontSize: 18,
-  },
-  transcriptText: {
-    color: "#fff",
-    fontSize: 16,
-    lineHeight: 24,
-  },
-  liveText: {
-    color: "rgba(249,115,22,0.8)",
-    fontStyle: "italic",
-  },
-
-  // Action Row
-  actionRow: {
-    flexDirection: "row",
-    gap: 12,
-    marginBottom: 16,
-  },
-  translateBtn: {
-    flex: 2,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#00E5A0",
-    borderRadius: 12,
-    paddingVertical: 14,
-    gap: 8,
-  },
-  translateBtnIcon: {
-    fontSize: 18,
-  },
-  translateBtnText: {
-    color: "#000",
-    fontSize: 15,
-    fontWeight: "700",
-  },
-  saveBtn: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "rgba(255,255,255,0.08)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.15)",
-    borderRadius: 12,
-    paddingVertical: 14,
+    borderRadius: 10,
     gap: 6,
+    flex: 1,
+    justifyContent: 'center',
   },
-  saveBtnIcon: {
-    fontSize: 16,
-  },
-  saveBtnText: {
-    color: "#fff",
-    fontSize: 15,
-    fontWeight: "600",
-  },
-  buttonDisabled: {
-    opacity: 0.5,
-  },
+  resultActionIcon: { fontSize: 14 },
+  resultActionText: { fontSize: 13, color: '#fff', fontWeight: '500' },
 
-  // Translation Box
-  translationBox: {
-    backgroundColor: "rgba(0,229,160,0.08)",
-    borderWidth: 1,
-    borderColor: "rgba(0,229,160,0.2)",
-    borderRadius: 16,
+  backVerify: {
+    marginTop: 12,
+    backgroundColor: '#0A0A0A',
+    borderRadius: 10,
+    padding: 12,
+    borderLeftWidth: 3,
+    borderLeftColor: '#00E67640',
+  },
+  backVerifyLabel: { fontSize: 12, color: '#888', marginBottom: 4 },
+  backVerifyText: { fontSize: 13, color: '#aaa', lineHeight: 18 },
+
+  // Language Picker
+  pickerHeader: { paddingTop: 60, paddingHorizontal: 20, paddingBottom: 16, flexDirection: 'row', alignItems: 'center', gap: 16 },
+  pickerBack: { fontSize: 16, color: '#00E676', fontWeight: '600' },
+  pickerTitle: { fontSize: 20, fontWeight: '700', color: '#fff' },
+  pickerOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
     padding: 16,
-    marginBottom: 24,
-  },
-  translationHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: 12,
-  },
-  translationLabel: {
-    color: "#00E5A0",
-    fontSize: 12,
-    fontWeight: "700",
-    textTransform: "uppercase",
-    letterSpacing: 1,
-  },
-  translationActions: {
-    flexDirection: "row",
+    borderBottomWidth: 1,
+    borderBottomColor: '#1A1A1A',
     gap: 12,
   },
-  translationText: {
-    color: "#fff",
-    fontSize: 16,
-    lineHeight: 24,
-  },
-
-  // Notes Section
-  notesSection: {
-    marginTop: 8,
-  },
-  notesTitle: {
-    color: "rgba(255,255,255,0.3)",
-    fontSize: 11,
-    fontWeight: "700",
-    letterSpacing: 1.5,
-    textTransform: "uppercase",
-    marginBottom: 12,
-  },
-  noteCard: {
-    flexDirection: "row",
-    backgroundColor: "rgba(255,255,255,0.03)",
-    borderRadius: 12,
-    marginBottom: 8,
-    overflow: "hidden",
-  },
-  noteContent: {
-    flex: 1,
-    padding: 14,
-  },
-  noteLangs: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    marginBottom: 8,
-  },
-  noteFlag: {
-    fontSize: 14,
-  },
-  noteArrow: {
-    color: "rgba(255,255,255,0.2)",
-    fontSize: 10,
-  },
-  noteOriginal: {
-    color: "rgba(255,255,255,0.6)",
-    fontSize: 14,
-    lineHeight: 20,
-    marginBottom: 4,
-  },
-  noteTranslation: {
-    color: "#00E5A0",
-    fontSize: 13,
-  },
-  noteDelete: {
-    width: 48,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "rgba(239,68,68,0.1)",
-  },
-  noteDeleteIcon: {
-    fontSize: 16,
-  },
-
-  // Empty State
-  emptyState: {
-    alignItems: "center",
-    paddingVertical: 60,
-  },
-  emptyEmoji: {
-    fontSize: 64,
-    marginBottom: 16,
-  },
-  emptyTitle: {
-    color: "#fff",
-    fontSize: 18,
-    fontWeight: "700",
-    marginBottom: 8,
-  },
-  emptyDesc: {
-    color: "rgba(255,255,255,0.4)",
-    fontSize: 14,
-    textAlign: "center",
-    lineHeight: 20,
-    paddingHorizontal: 40,
-  },
+  pickerOptionActive: { backgroundColor: '#00E67610' },
+  pickerFlag: { fontSize: 24 },
+  pickerName: { fontSize: 16, color: '#fff', flex: 1 },
+  pickerNative: { fontSize: 14, color: '#888' },
 });

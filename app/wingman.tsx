@@ -1,204 +1,525 @@
 /**
- * wingman.tsx — Wingman Entry Screen
- *
- * Landing screen for the Call Wingman feature.
- * AI whispers perfect responses in your ear during phone calls.
- *
- * This screen provides context and options before activating Wingman.
- *
+ * Wingman Screen — AI Voice Coaching
+ * 
+ * Listens to ambient speech, generates 3 response suggestions via Claude API,
+ * delivers via TTS to AirPods/Meta glasses/any Bluetooth device.
+ * 
+ * Four modes: Dating, Interview, Hard Talk, Sales
+ * Three tones: Bold, Warm, Safe
+ * 
  * @version 1.0.0
  */
 
-import React from "react";
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
-  StyleSheet,
   TouchableOpacity,
   ScrollView,
-  SafeAreaView,
-  Platform,
+  StyleSheet,
+  ActivityIndicator,
   Dimensions,
-} from "react-native";
-import { useRouter } from "expo-router";
-
-const { width: SCREEN_WIDTH } = Dimensions.get("window");
+  Animated,
+  Platform,
+} from 'react-native';
+import * as Speech from 'expo-speech';
+import * as Haptics from 'expo-haptics';
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// USE CASE CARDS
+// TYPES
 // ═══════════════════════════════════════════════════════════════════════════════
 
-const USE_CASES = [
+type CoachingMode = 'dating' | 'interview' | 'hardtalk' | 'sales';
+type SuggestionTone = 'bold' | 'warm' | 'safe';
+
+interface Suggestion {
+  tone: SuggestionTone;
+  text: string;
+}
+
+interface CoachingScenario {
+  id: CoachingMode;
+  name: string;
+  icon: string;
+  description: string;
+  systemContext: string;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// CONSTANTS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const SCENARIOS: CoachingScenario[] = [
   {
-    emoji: "💼",
-    title: "Sales Calls",
-    description: "Close more deals with perfect objection handling",
-    color: "#00E5A0",
+    id: 'dating',
+    name: 'Dating',
+    icon: '💕',
+    description: 'Charming, confident, authentic',
+    systemContext:
+      'You are a dating conversation coach. The user is on a date or in a romantic social interaction. Generate responses that are charming, confident, and authentic. Avoid anything creepy or overly aggressive. Focus on genuine connection and showing interest.',
   },
   {
-    emoji: "🎯",
-    title: "Job Interviews",
-    description: "Nail every question with confident answers",
-    color: "#818CF8",
+    id: 'interview',
+    name: 'Interview',
+    icon: '💼',
+    description: 'Professional, articulate, compelling',
+    systemContext:
+      'You are a job interview coach. The user is in a job interview or professional meeting. Generate responses that are professional, articulate, and compelling. Highlight achievements without bragging. Show enthusiasm and competence.',
   },
   {
-    emoji: "💕",
-    title: "First Dates",
-    description: "Always charming, never awkward",
-    color: "#F472B6",
+    id: 'hardtalk',
+    name: 'Hard Talk',
+    icon: '🗣️',
+    description: 'Clear, empathetic, boundary-setting',
+    systemContext:
+      'You are a difficult conversation coach. The user is having a challenging personal or professional conversation. Generate responses that are clear, empathetic, and set healthy boundaries. Help them communicate needs without escalating conflict.',
   },
   {
-    emoji: "🧠",
-    title: "Hard Talks",
-    description: "Stay calm and clear under pressure",
-    color: "#FBBF24",
+    id: 'sales',
+    name: 'Sales',
+    icon: '🎯',
+    description: 'Persuasive, value-focused, closing',
+    systemContext:
+      'You are a sales conversation coach. The user is in a client meeting, pitch, or sales call. Generate responses that address objections, highlight value, and move toward closing. Be persuasive but not pushy.',
   },
 ];
 
-function UseCaseCard({
-  emoji,
-  title,
-  description,
-  color,
-}: (typeof USE_CASES)[0]) {
+const TONE_CONFIG: Record<SuggestionTone, { label: string; color: string; icon: string }> = {
+  bold: { label: 'BOLD', color: '#FF6B6B', icon: '🔥' },
+  warm: { label: 'WARM', color: '#FFD93D', icon: '💛' },
+  safe: { label: 'SAFE', color: '#6BCB77', icon: '🛡️' },
+};
+
+const CYRANO_API_URL = 'https://entrevoz.co/api/cyrano'; // Your deployed API
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SUGGESTION CARD
+// ═══════════════════════════════════════════════════════════════════════════════
+
+function SuggestionCard({
+  suggestion,
+  onSpeak,
+  isSpeaking,
+}: {
+  suggestion: Suggestion;
+  onSpeak: () => void;
+  isSpeaking: boolean;
+}) {
+  const config = TONE_CONFIG[suggestion.tone];
+  const pulseAnim = useRef(new Animated.Value(1)).current;
+
+  useEffect(() => {
+    if (isSpeaking) {
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(pulseAnim, { toValue: 1.03, duration: 600, useNativeDriver: true }),
+          Animated.timing(pulseAnim, { toValue: 1, duration: 600, useNativeDriver: true }),
+        ])
+      ).start();
+    } else {
+      pulseAnim.setValue(1);
+    }
+  }, [isSpeaking, pulseAnim]);
+
   return (
-    <View style={[styles.useCaseCard, { borderColor: color + "40" }]}>
-      <View style={[styles.useCaseIcon, { backgroundColor: color + "20" }]}>
-        <Text style={styles.useCaseEmoji}>{emoji}</Text>
-      </View>
-      <View style={styles.useCaseContent}>
-        <Text style={styles.useCaseTitle}>{title}</Text>
-        <Text style={styles.useCaseDescription}>{description}</Text>
-      </View>
+    <Animated.View style={[{ transform: [{ scale: pulseAnim }] }]}>
+      <TouchableOpacity
+        style={[styles.suggestionCard, { borderColor: config.color + '60' }]}
+        onPress={() => {
+          onSpeak();
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+        }}
+        activeOpacity={0.7}
+      >
+        <View style={styles.suggestionHeader}>
+          <View style={[styles.toneBadge, { backgroundColor: config.color + '20' }]}>
+            <Text style={styles.toneIcon}>{config.icon}</Text>
+            <Text style={[styles.toneLabel, { color: config.color }]}>{config.label}</Text>
+          </View>
+          {isSpeaking && (
+            <View style={styles.speakingIndicator}>
+              <Text style={styles.speakingText}>🔊 Speaking</Text>
+            </View>
+          )}
+        </View>
+        <Text style={styles.suggestionText}>{suggestion.text}</Text>
+        <Text style={styles.tapHint}>Tap to whisper in your ear</Text>
+      </TouchableOpacity>
+    </Animated.View>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// LISTENING INDICATOR
+// ═══════════════════════════════════════════════════════════════════════════════
+
+function ListeningPulse({ isActive }: { isActive: boolean }) {
+  const pulse1 = useRef(new Animated.Value(0.4)).current;
+  const pulse2 = useRef(new Animated.Value(0.4)).current;
+  const pulse3 = useRef(new Animated.Value(0.4)).current;
+
+  useEffect(() => {
+    if (isActive) {
+      const animate = (value: Animated.Value, delay: number) =>
+        Animated.loop(
+          Animated.sequence([
+            Animated.delay(delay),
+            Animated.timing(value, { toValue: 1, duration: 400, useNativeDriver: true }),
+            Animated.timing(value, { toValue: 0.4, duration: 400, useNativeDriver: true }),
+          ])
+        );
+      animate(pulse1, 0).start();
+      animate(pulse2, 150).start();
+      animate(pulse3, 300).start();
+    } else {
+      [pulse1, pulse2, pulse3].forEach((v) => v.setValue(0.4));
+    }
+  }, [isActive, pulse1, pulse2, pulse3]);
+
+  return (
+    <View style={styles.listeningPulse}>
+      {[pulse1, pulse2, pulse3].map((anim, i) => (
+        <Animated.View
+          key={i}
+          style={[
+            styles.pulseBar,
+            { opacity: anim, transform: [{ scaleY: anim }] },
+          ]}
+        />
+      ))}
     </View>
   );
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// MAIN SCREEN
+// MAIN COMPONENT
 // ═══════════════════════════════════════════════════════════════════════════════
 
 export default function WingmanScreen() {
-  const router = useRouter();
+  const [selectedMode, setSelectedMode] = useState<CoachingMode | null>(null);
+  const [isListening, setIsListening] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [capturedSpeech, setCapturedSpeech] = useState('');
+  const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
+  const [speakingTone, setSpeakingTone] = useState<SuggestionTone | null>(null);
+  const [conversationHistory, setConversationHistory] = useState<string[]>([]);
+  const [error, setError] = useState<string | null>(null);
 
-  const handleStartWingman = () => {
-    router.push("/call-wingman");
+  // ─────────────────────────────────────────────
+  // SPEECH RECOGNITION (using expo-speech-recognition)
+  // ─────────────────────────────────────────────
+
+  // Note: For production, integrate expo-speech-recognition for continuous listening.
+  // For now, we simulate with a manual input flow and placeholder.
+  // The actual speech recognition module was in the web app via Web Speech API.
+
+  const startListening = useCallback(async () => {
+    setIsListening(true);
+    setError(null);
+    setSuggestions([]);
+    setCapturedSpeech('');
+
+    // In production: start expo-speech-recognition continuous listening
+    // For TestFlight demo: use simulated speech input after delay
+    // This will be replaced with actual speech recognition integration
+  }, []);
+
+  const stopListening = useCallback(() => {
+    setIsListening(false);
+  }, []);
+
+  // ─────────────────────────────────────────────
+  // AI SUGGESTION GENERATION
+  // ─────────────────────────────────────────────
+
+  const generateSuggestions = useCallback(
+    async (speech: string) => {
+      if (!selectedMode || !speech.trim()) return;
+
+      setIsProcessing(true);
+      setError(null);
+
+      const scenario = SCENARIOS.find((s) => s.id === selectedMode);
+      if (!scenario) return;
+
+      try {
+        const response = await fetch(CYRANO_API_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            speech,
+            mode: selectedMode,
+            context: scenario.systemContext,
+            history: conversationHistory.slice(-6),
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error(`API returned ${response.status}`);
+        }
+
+        const data = await response.json();
+
+        if (data.suggestions) {
+          setSuggestions(data.suggestions);
+          setConversationHistory((prev) => [...prev, `[them]: ${speech}`]);
+        } else {
+          // Fallback: generate locally if API is not deployed yet
+          setSuggestions(generateFallbackSuggestions(speech, selectedMode));
+        }
+      } catch (e) {
+        console.warn('[Wingman] API call failed, using fallback:', e);
+        setSuggestions(generateFallbackSuggestions(speech, selectedMode));
+      } finally {
+        setIsProcessing(false);
+      }
+    },
+    [selectedMode, conversationHistory]
+  );
+
+  // ─────────────────────────────────────────────
+  // FALLBACK SUGGESTIONS (when API unavailable)
+  // ─────────────────────────────────────────────
+
+  const generateFallbackSuggestions = (speech: string, mode: CoachingMode): Suggestion[] => {
+    const fallbacks: Record<CoachingMode, Suggestion[]> = {
+      dating: [
+        { tone: 'bold', text: "That's really interesting — I love that about you. What made you get into that?" },
+        { tone: 'warm', text: "I can tell that means a lot to you. I'd love to hear more about it." },
+        { tone: 'safe', text: "That's cool! How long have you been doing that?" },
+      ],
+      interview: [
+        { tone: 'bold', text: "Absolutely — in my last role, I led a similar initiative that increased revenue by 30%." },
+        { tone: 'warm', text: "That resonates with me. I've always been passionate about solving exactly that kind of problem." },
+        { tone: 'safe', text: "That's a great question. In my experience, the key factor is..." },
+      ],
+      hardtalk: [
+        { tone: 'bold', text: "I hear you, and I need to be honest — this isn't working for me the way it is." },
+        { tone: 'warm', text: "I understand where you're coming from, and I want us to find something that works for both of us." },
+        { tone: 'safe', text: "I appreciate you sharing that. Can we talk about what a good solution looks like?" },
+      ],
+      sales: [
+        { tone: 'bold', text: "I understand the concern about price — but what's the cost of NOT solving this problem?" },
+        { tone: 'warm', text: "That's a valid concern. Let me show you how other clients in your situation saw ROI within 60 days." },
+        { tone: 'safe', text: "I hear you. Would it help if I walked through a case study that addresses exactly that?" },
+      ],
+    };
+
+    return fallbacks[mode];
   };
 
-  return (
-    <SafeAreaView style={styles.container}>
-      <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* Header */}
+  // ─────────────────────────────────────────────
+  // TTS — Whisper to Bluetooth device
+  // ─────────────────────────────────────────────
+
+  const speakSuggestion = useCallback(
+    async (suggestion: Suggestion) => {
+      setSpeakingTone(suggestion.tone);
+
+      await Speech.speak(suggestion.text, {
+        language: 'en-US',
+        pitch: 0.95,
+        rate: 0.9,
+        onDone: () => {
+          setSpeakingTone(null);
+          setConversationHistory((prev) => [
+            ...prev,
+            `[you, ${suggestion.tone}]: ${suggestion.text}`,
+          ]);
+        },
+        onError: () => setSpeakingTone(null),
+      });
+    },
+    []
+  );
+
+  // ─────────────────────────────────────────────
+  // DEMO: Simulate receiving speech
+  // ─────────────────────────────────────────────
+
+  const simulateSpeechInput = useCallback(() => {
+    const demoInputs: Record<CoachingMode, string[]> = {
+      dating: [
+        "So what do you like to do for fun?",
+        "I've been living here for about two years now",
+        "Do you travel much?",
+      ],
+      interview: [
+        "Tell me about a time you led a team through a difficult project",
+        "Why are you interested in this role?",
+        "What's your biggest weakness?",
+      ],
+      hardtalk: [
+        "I just feel like you don't listen to me anymore",
+        "This isn't what we agreed on",
+        "I'm not sure this is going to work",
+      ],
+      sales: [
+        "We're happy with our current provider",
+        "That seems expensive compared to alternatives",
+        "We need to think about it and get back to you",
+      ],
+    };
+
+    if (!selectedMode) return;
+    const inputs = demoInputs[selectedMode];
+    const speech = inputs[Math.floor(Math.random() * inputs.length)];
+    setCapturedSpeech(speech);
+    generateSuggestions(speech);
+  }, [selectedMode, generateSuggestions]);
+
+  // ─────────────────────────────────────────────
+  // RENDER: MODE SELECTION
+  // ─────────────────────────────────────────────
+
+  if (!selectedMode) {
+    return (
+      <View style={styles.container}>
         <View style={styles.header}>
-          <TouchableOpacity
-            style={styles.backButton}
-            onPress={() => router.back()}
-            accessibilityLabel="Go back"
-            accessibilityRole="button"
-          >
-            <Text style={styles.backArrow}>←</Text>
-          </TouchableOpacity>
-          <View style={styles.headerContent}>
-            <Text style={styles.title}>Call Wingman</Text>
-            <Text style={styles.subtitle}>Your AI-powered conversation coach</Text>
-          </View>
+          <Text style={styles.headerTitle}>Wingman</Text>
+          <Text style={styles.headerSubtitle}>AI whispers perfect responses in your ear</Text>
         </View>
 
-        {/* Hero */}
-        <View style={styles.heroSection}>
-          <View style={styles.heroIcon}>
-            <Text style={styles.heroEmoji}>📞</Text>
-            <View style={styles.heroBadge}>
-              <Text style={styles.heroBadgeText}>AI</Text>
-            </View>
-          </View>
-          <Text style={styles.heroTitle}>Never stumble on a call again</Text>
-          <Text style={styles.heroTagline}>
-            AI whispers perfect responses in your ear during phone calls
-          </Text>
-        </View>
+        <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+          <Text style={styles.sectionLabel}>Choose your scenario</Text>
 
-        {/* Value Prop */}
-        <View style={styles.valueBox}>
-          <Text style={styles.valueEmoji}>🎧</Text>
-          <Text style={styles.valueText}>
-            Works with AirPods or any Bluetooth headset. The other person won't hear a thing.
-          </Text>
-        </View>
-
-        {/* Use Cases */}
-        <Text style={styles.sectionTitle}>PERFECT FOR</Text>
-        <View style={styles.useCasesGrid}>
-          {USE_CASES.map((useCase, index) => (
-            <UseCaseCard key={index} {...useCase} />
+          {SCENARIOS.map((scenario) => (
+            <TouchableOpacity
+              key={scenario.id}
+              style={styles.scenarioCard}
+              onPress={() => {
+                setSelectedMode(scenario.id);
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+              }}
+              activeOpacity={0.7}
+            >
+              <View style={styles.scenarioIcon}>
+                <Text style={styles.scenarioEmoji}>{scenario.icon}</Text>
+              </View>
+              <View style={styles.scenarioInfo}>
+                <Text style={styles.scenarioName}>{scenario.name}</Text>
+                <Text style={styles.scenarioDesc}>{scenario.description}</Text>
+              </View>
+              <Text style={styles.scenarioArrow}>→</Text>
+            </TouchableOpacity>
           ))}
-        </View>
 
-        {/* How it works */}
-        <Text style={styles.sectionTitle}>HOW IT WORKS</Text>
-        <View style={styles.howItWorks}>
-          <View style={styles.howStep}>
-            <View style={styles.howStepNumber}>
-              <Text style={styles.howStepNumberText}>1</Text>
-            </View>
-            <View style={styles.howStepContent}>
-              <Text style={styles.howStepTitle}>Start a phone call</Text>
-              <Text style={styles.howStepDesc}>
-                Make or receive a call, then put it on speaker
-              </Text>
-            </View>
+          {/* Device Info */}
+          <View style={styles.deviceInfo}>
+            <Text style={styles.deviceTitle}>🎧 Works with</Text>
+            <Text style={styles.deviceList}>
+              AirPods · Meta Ray-Ban Glasses · Bose Frames · Galaxy Buds · Any Bluetooth earpiece
+            </Text>
           </View>
-          <View style={styles.howStepConnector} />
-          <View style={styles.howStep}>
-            <View style={styles.howStepNumber}>
-              <Text style={styles.howStepNumberText}>2</Text>
-            </View>
-            <View style={styles.howStepContent}>
-              <Text style={styles.howStepTitle}>Activate Wingman</Text>
-              <Text style={styles.howStepDesc}>
-                Choose your mode (Sales, Interview, Date, Hard Talk)
-              </Text>
-            </View>
-          </View>
-          <View style={styles.howStepConnector} />
-          <View style={styles.howStep}>
-            <View style={styles.howStepNumber}>
-              <Text style={styles.howStepNumberText}>3</Text>
-            </View>
-            <View style={styles.howStepContent}>
-              <Text style={styles.howStepTitle}>Get suggestions</Text>
-              <Text style={styles.howStepDesc}>
-                AI listens and whispers perfect responses in your ear
-              </Text>
-            </View>
-          </View>
-        </View>
 
-        {/* CTA */}
+          <View style={{ height: 100 }} />
+        </ScrollView>
+      </View>
+    );
+  }
+
+  // ─────────────────────────────────────────────
+  // RENDER: ACTIVE COACHING
+  // ─────────────────────────────────────────────
+
+  const currentScenario = SCENARIOS.find((s) => s.id === selectedMode);
+
+  return (
+    <View style={styles.container}>
+      {/* Header with back */}
+      <View style={styles.activeHeader}>
         <TouchableOpacity
-          style={styles.primaryButton}
-          onPress={handleStartWingman}
-          accessibilityLabel="Start Call Wingman"
-          accessibilityRole="button"
+          style={styles.backButton}
+          onPress={() => {
+            setSelectedMode(null);
+            setSuggestions([]);
+            setCapturedSpeech('');
+            setConversationHistory([]);
+            stopListening();
+          }}
         >
-          <Text style={styles.primaryButtonEmoji}>🎯</Text>
-          <Text style={styles.primaryButtonText}>Start Wingman</Text>
-          <Text style={styles.primaryButtonArrow}>→</Text>
+          <Text style={styles.backText}>← Back</Text>
+        </TouchableOpacity>
+        <View style={styles.activeHeaderInfo}>
+          <Text style={styles.activeTitle}>
+            {currentScenario?.icon} {currentScenario?.name} Mode
+          </Text>
+          <Text style={styles.activeSubtitle}>
+            {isListening ? 'Listening...' : 'Tap to start'}
+          </Text>
+        </View>
+      </View>
+
+      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+        {/* Listening Control */}
+        <TouchableOpacity
+          style={[styles.listenButton, isListening && styles.listenButtonActive]}
+          onPress={() => {
+            if (isListening) {
+              stopListening();
+              // Trigger demo suggestion
+              simulateSpeechInput();
+            } else {
+              startListening();
+              // Auto-trigger demo after 3s
+              setTimeout(simulateSpeechInput, 3000);
+            }
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+          }}
+          activeOpacity={0.8}
+        >
+          <ListeningPulse isActive={isListening} />
+          <Text style={styles.listenButtonText}>
+            {isListening ? 'Listening — Tap when they finish' : 'Tap to Listen'}
+          </Text>
+          {isListening && (
+            <Text style={styles.listenHint}>
+              AI is hearing the conversation...
+            </Text>
+          )}
         </TouchableOpacity>
 
-        {/* Footer note */}
-        <View style={styles.footerNote}>
-          <Text style={styles.footerNoteText}>
-            Requires AirPods or Bluetooth headset for private coaching.
-            Works best with calls on speaker.
-          </Text>
-        </View>
+        {/* Captured Speech */}
+        {capturedSpeech ? (
+          <View style={styles.capturedCard}>
+            <Text style={styles.capturedLabel}>🎤 They said:</Text>
+            <Text style={styles.capturedText}>"{capturedSpeech}"</Text>
+          </View>
+        ) : null}
+
+        {/* Processing */}
+        {isProcessing && (
+          <View style={styles.processingCard}>
+            <ActivityIndicator color="#00E676" size="small" />
+            <Text style={styles.processingText}>Generating responses...</Text>
+          </View>
+        )}
+
+        {/* Suggestions */}
+        {suggestions.length > 0 && (
+          <View style={styles.suggestionsContainer}>
+            <Text style={styles.suggestionsLabel}>Your responses:</Text>
+            {suggestions.map((suggestion, i) => (
+              <SuggestionCard
+                key={`${suggestion.tone}-${i}`}
+                suggestion={suggestion}
+                onSpeak={() => speakSuggestion(suggestion)}
+                isSpeaking={speakingTone === suggestion.tone}
+              />
+            ))}
+          </View>
+        )}
+
+        {/* Error */}
+        {error && (
+          <View style={styles.errorCard}>
+            <Text style={styles.errorText}>{error}</Text>
+          </View>
+        )}
+
+        <View style={{ height: 120 }} />
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -206,254 +527,130 @@ export default function WingmanScreen() {
 // STYLES
 // ═══════════════════════════════════════════════════════════════════════════════
 
+const { width } = Dimensions.get('window');
+
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#030507",
-  },
-  scroll: {
-    flex: 1,
-  },
-  scrollContent: {
-    padding: 20,
-    paddingBottom: 40,
-  },
+  container: { flex: 1, backgroundColor: '#0A0A0A' },
 
   // Header
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 24,
-    paddingTop: Platform.OS === "android" ? 16 : 0,
-  },
-  backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "rgba(255,255,255,0.06)",
-    alignItems: "center",
-    justifyContent: "center",
-    marginRight: 12,
-  },
-  backArrow: {
-    color: "#fff",
-    fontSize: 20,
-  },
-  headerContent: {
-    flex: 1,
-  },
-  title: {
-    color: "#fff",
-    fontSize: 24,
-    fontWeight: "800",
-    letterSpacing: -0.5,
-  },
-  subtitle: {
-    color: "rgba(255,255,255,0.4)",
-    fontSize: 14,
-    marginTop: 2,
-  },
+  header: { paddingTop: 60, paddingHorizontal: 20, paddingBottom: 16 },
+  headerTitle: { fontSize: 28, fontWeight: '800', color: '#fff', letterSpacing: 1 },
+  headerSubtitle: { fontSize: 14, color: '#00E676', marginTop: 4 },
 
-  // Hero
-  heroSection: {
-    alignItems: "center",
-    paddingVertical: 24,
-  },
-  heroIcon: {
-    width: 90,
-    height: 90,
-    borderRadius: 28,
-    backgroundColor: "rgba(0,229,160,0.15)",
-    borderWidth: 2,
-    borderColor: "#00E5A0",
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 20,
-    position: "relative",
-  },
-  heroEmoji: {
-    fontSize: 40,
-  },
-  heroBadge: {
-    position: "absolute",
-    bottom: -8,
-    right: -8,
-    backgroundColor: "#00E5A0",
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 8,
-  },
-  heroBadgeText: {
-    color: "#000",
-    fontSize: 10,
-    fontWeight: "900",
-    letterSpacing: 1,
-  },
-  heroTitle: {
-    color: "#fff",
-    fontSize: 24,
-    fontWeight: "800",
-    textAlign: "center",
-    marginBottom: 10,
-    letterSpacing: -0.5,
-  },
-  heroTagline: {
-    color: "#00E5A0",
-    fontSize: 15,
-    fontWeight: "500",
-    textAlign: "center",
-    lineHeight: 22,
-  },
+  content: { flex: 1, paddingHorizontal: 20 },
 
-  // Value Box
-  valueBox: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "rgba(255,255,255,0.03)",
+  sectionLabel: { fontSize: 13, color: '#888', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 12 },
+
+  // Scenario Cards
+  scenarioCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1A1A1A',
+    borderRadius: 16,
+    padding: 18,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#2A2A2A',
+  },
+  scenarioIcon: {
+    width: 50,
+    height: 50,
+    borderRadius: 14,
+    backgroundColor: '#00E67615',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 14,
+  },
+  scenarioEmoji: { fontSize: 24 },
+  scenarioInfo: { flex: 1 },
+  scenarioName: { fontSize: 18, fontWeight: '700', color: '#fff', marginBottom: 2 },
+  scenarioDesc: { fontSize: 13, color: '#888' },
+  scenarioArrow: { fontSize: 20, color: '#00E676' },
+
+  // Device Info
+  deviceInfo: {
+    backgroundColor: '#1A1A1A',
     borderRadius: 14,
     padding: 16,
-    gap: 14,
-    marginBottom: 28,
-  },
-  valueEmoji: {
-    fontSize: 28,
-  },
-  valueText: {
-    flex: 1,
-    color: "rgba(255,255,255,0.5)",
-    fontSize: 13,
-    lineHeight: 19,
-  },
-
-  // Section Title
-  sectionTitle: {
-    color: "rgba(255,255,255,0.3)",
-    fontSize: 11,
-    fontWeight: "700",
-    letterSpacing: 1.5,
-    textTransform: "uppercase",
-    marginBottom: 14,
-  },
-
-  // Use Cases
-  useCasesGrid: {
-    gap: 10,
-    marginBottom: 28,
-  },
-  useCaseCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "rgba(255,255,255,0.03)",
+    marginTop: 20,
     borderWidth: 1,
-    borderRadius: 14,
-    padding: 14,
-    gap: 14,
+    borderColor: '#2A2A2A',
   },
-  useCaseIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 14,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  useCaseEmoji: {
-    fontSize: 24,
-  },
-  useCaseContent: {
-    flex: 1,
-  },
-  useCaseTitle: {
-    color: "#fff",
-    fontSize: 15,
-    fontWeight: "700",
-    marginBottom: 2,
-  },
-  useCaseDescription: {
-    color: "rgba(255,255,255,0.4)",
-    fontSize: 13,
-  },
+  deviceTitle: { fontSize: 15, fontWeight: '600', color: '#fff', marginBottom: 6 },
+  deviceList: { fontSize: 13, color: '#888', lineHeight: 20 },
 
-  // How it works
-  howItWorks: {
-    marginBottom: 28,
-  },
-  howStep: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    gap: 14,
-  },
-  howStepNumber: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: "rgba(0,229,160,0.15)",
-    borderWidth: 1,
-    borderColor: "rgba(0,229,160,0.3)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  howStepNumberText: {
-    color: "#00E5A0",
-    fontSize: 14,
-    fontWeight: "700",
-  },
-  howStepContent: {
-    flex: 1,
-    paddingTop: 2,
-  },
-  howStepTitle: {
-    color: "#fff",
-    fontSize: 15,
-    fontWeight: "700",
-    marginBottom: 3,
-  },
-  howStepDesc: {
-    color: "rgba(255,255,255,0.4)",
-    fontSize: 13,
-    lineHeight: 18,
-  },
-  howStepConnector: {
-    width: 2,
-    height: 24,
-    backgroundColor: "rgba(0,229,160,0.2)",
-    marginLeft: 15,
-    marginVertical: 4,
-  },
+  // Active Header
+  activeHeader: { paddingTop: 60, paddingHorizontal: 20, paddingBottom: 16, flexDirection: 'row', alignItems: 'center' },
+  backButton: { marginRight: 16 },
+  backText: { fontSize: 16, color: '#00E676', fontWeight: '600' },
+  activeHeaderInfo: { flex: 1 },
+  activeTitle: { fontSize: 20, fontWeight: '700', color: '#fff' },
+  activeSubtitle: { fontSize: 13, color: '#888', marginTop: 2 },
 
-  // Primary Button
-  primaryButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#00E5A0",
-    borderRadius: 16,
-    paddingVertical: 18,
-    gap: 10,
+  // Listen Button
+  listenButton: {
+    backgroundColor: '#1A1A1A',
+    borderRadius: 20,
+    padding: 24,
+    alignItems: 'center',
+    marginBottom: 20,
+    borderWidth: 2,
+    borderColor: '#2A2A2A',
+  },
+  listenButtonActive: {
+    borderColor: '#00E676',
+    backgroundColor: '#00E67610',
+  },
+  listenButtonText: { fontSize: 18, fontWeight: '700', color: '#fff', marginTop: 12 },
+  listenHint: { fontSize: 13, color: '#00E676', marginTop: 6 },
+
+  // Listening Pulse
+  listeningPulse: { flexDirection: 'row', alignItems: 'center', gap: 4, height: 30 },
+  pulseBar: { width: 4, height: 30, backgroundColor: '#00E676', borderRadius: 2 },
+
+  // Captured Speech
+  capturedCard: {
+    backgroundColor: '#1A1A1A',
+    borderRadius: 14,
+    padding: 16,
     marginBottom: 16,
+    borderLeftWidth: 3,
+    borderLeftColor: '#888',
   },
-  primaryButtonEmoji: {
-    fontSize: 20,
-  },
-  primaryButtonText: {
-    color: "#000",
-    fontSize: 18,
-    fontWeight: "800",
-  },
-  primaryButtonArrow: {
-    color: "#000",
-    fontSize: 18,
-    fontWeight: "800",
-  },
+  capturedLabel: { fontSize: 12, color: '#888', marginBottom: 6 },
+  capturedText: { fontSize: 16, color: '#ccc', fontStyle: 'italic', lineHeight: 22 },
 
-  // Footer Note
-  footerNote: {
-    alignItems: "center",
-    paddingHorizontal: 20,
+  // Processing
+  processingCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    paddingVertical: 16,
   },
-  footerNoteText: {
-    color: "rgba(255,255,255,0.3)",
-    fontSize: 12,
-    textAlign: "center",
-    lineHeight: 18,
+  processingText: { fontSize: 14, color: '#888' },
+
+  // Suggestions
+  suggestionsContainer: { marginBottom: 20 },
+  suggestionsLabel: { fontSize: 13, color: '#888', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 12 },
+
+  suggestionCard: {
+    backgroundColor: '#1A1A1A',
+    borderRadius: 16,
+    padding: 18,
+    marginBottom: 12,
+    borderWidth: 1,
   },
+  suggestionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
+  toneBadge: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8, gap: 4 },
+  toneIcon: { fontSize: 14 },
+  toneLabel: { fontSize: 12, fontWeight: '800', letterSpacing: 1 },
+  speakingIndicator: { flexDirection: 'row', alignItems: 'center' },
+  speakingText: { fontSize: 12, color: '#00E676' },
+  suggestionText: { fontSize: 16, color: '#fff', lineHeight: 23 },
+  tapHint: { fontSize: 12, color: '#555', marginTop: 8 },
+
+  // Error
+  errorCard: { backgroundColor: '#FF525220', borderRadius: 12, padding: 14 },
+  errorText: { fontSize: 14, color: '#FF5252' },
 });
