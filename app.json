@@ -25,9 +25,10 @@
         "UIBackgroundModes": [
           "audio",
           "voip"
-        ]
+        ],
+        "NSPhotoLibraryUsageDescription": "Entrevoz needs photo library access to share images."
       },
-      "buildNumber": "4"
+      "buildNumber": "5"
     },
     "android": {
       "adaptiveIcon": {
