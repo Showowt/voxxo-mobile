@@ -31,6 +31,7 @@
       "buildNumber": "7"
     },
     "android": {
+      "versionCode": 1,
       "adaptiveIcon": {
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
@@ -76,9 +77,9 @@
             "newArchEnabled": true
           },
           "android": {
-            "compileSdkVersion": 35,
+            "compileSdkVersion": 36,
             "targetSdkVersion": 35,
-            "buildToolsVersion": "35.0.0",
+            "buildToolsVersion": "36.0.0",
             "newArchEnabled": true
           }
         }
