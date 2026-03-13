@@ -63,6 +63,10 @@ export default function RootLayout() {
         <Stack.Screen name="settings" />
         <Stack.Screen name="talk/[code]" />
         <Stack.Screen name="call-wingman" />
+        <Stack.Screen name="wingman" />
+        <Stack.Screen name="face-to-face" />
+        <Stack.Screen name="vox-type" />
+        <Stack.Screen name="vox-note" />
       </Stack>
     </View>
   );

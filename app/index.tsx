@@ -261,7 +261,7 @@ export default function HomeScreen() {
               "Hard talks — stay calm & clear",
             ]}
             ctaText="Try Call Wingman"
-            href="/call-wingman"
+            href="/wingman"
             accentColor="#00E5A0"
             isPrimary={true}
           />
@@ -334,6 +334,59 @@ export default function HomeScreen() {
                 </Pressable>
               </Link>
             </View>
+
+            {/* Learn More Link */}
+            <Link href={"/face-to-face" as any} asChild>
+              <Pressable
+                style={({ pressed }) => [
+                  styles.learnMoreLink,
+                  pressed && styles.learnMoreLinkPressed,
+                ]}
+                accessibilityRole="button"
+                accessibilityLabel="Learn more about Face-to-Face mode"
+              >
+                <Text style={styles.learnMoreText}>Learn more →</Text>
+              </Pressable>
+            </Link>
+          </View>
+
+          {/* Quick Tools Section */}
+          <View style={styles.quickToolsRow}>
+            {/* VoxType Card */}
+            <Link href={"/vox-type" as any} asChild>
+              <Pressable
+                style={({ pressed }) => [
+                  styles.quickToolCard,
+                  pressed && styles.quickToolCardPressed,
+                ]}
+                accessibilityRole="button"
+                accessibilityLabel="VoxType - Text translation"
+              >
+                <View style={styles.quickToolIcon}>
+                  <Text style={styles.quickToolEmoji}>⌨️</Text>
+                </View>
+                <Text style={styles.quickToolTitle}>VoxType</Text>
+                <Text style={styles.quickToolDesc}>Type & translate</Text>
+              </Pressable>
+            </Link>
+
+            {/* VoxNote Card */}
+            <Link href={"/vox-note" as any} asChild>
+              <Pressable
+                style={({ pressed }) => [
+                  styles.quickToolCard,
+                  pressed && styles.quickToolCardPressed,
+                ]}
+                accessibilityRole="button"
+                accessibilityLabel="VoxNote - Voice notes with translation"
+              >
+                <View style={styles.quickToolIcon}>
+                  <Text style={styles.quickToolEmoji}>🎙️</Text>
+                </View>
+                <Text style={styles.quickToolTitle}>VoxNote</Text>
+                <Text style={styles.quickToolDesc}>Voice notes</Text>
+              </Pressable>
+            </Link>
           </View>
         </View>
 
@@ -638,6 +691,61 @@ const styles = StyleSheet.create({
   },
   ctaButtonDisabled: {
     opacity: 0.6,
+  },
+  learnMoreLink: {
+    alignItems: "center",
+    paddingTop: 16,
+    paddingBottom: 4,
+  },
+  learnMoreLinkPressed: {
+    opacity: 0.7,
+  },
+  learnMoreText: {
+    color: "rgba(129, 140, 248, 0.7)",
+    fontSize: 14,
+    fontWeight: "600",
+  },
+
+  // Quick Tools
+  quickToolsRow: {
+    flexDirection: "row",
+    gap: 12,
+  },
+  quickToolCard: {
+    flex: 1,
+    backgroundColor: "#0A0E14",
+    borderRadius: 20,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.08)",
+    alignItems: "center",
+  },
+  quickToolCardPressed: {
+    opacity: 0.85,
+    transform: [{ scale: 0.98 }],
+  },
+  quickToolIcon: {
+    width: 56,
+    height: 56,
+    borderRadius: 16,
+    backgroundColor: "rgba(255, 255, 255, 0.04)",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 12,
+  },
+  quickToolEmoji: {
+    fontSize: 28,
+  },
+  quickToolTitle: {
+    color: "#FFFFFF",
+    fontSize: 16,
+    fontWeight: "700",
+    marginBottom: 4,
+  },
+  quickToolDesc: {
+    color: "rgba(255, 255, 255, 0.4)",
+    fontSize: 12,
+    fontWeight: "500",
   },
 
   // How it works
