@@ -29,7 +29,7 @@
         ]
       },
       "copyright": "© 2026 MachineMind LLC",
-      "buildNumber": "2"
+      "buildNumber": "3"
     },
     "android": {
       "adaptiveIcon": {
@@ -63,7 +63,10 @@
         "react-native-ble-plx",
         {
           "isBackgroundEnabled": true,
-          "modes": ["peripheral", "central"]
+          "modes": [
+            "peripheral",
+            "central"
+          ]
         }
       ],
       [
