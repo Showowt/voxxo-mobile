@@ -28,7 +28,7 @@
         ],
         "NSPhotoLibraryUsageDescription": "Entrevoz needs photo library access to share images."
       },
-      "buildNumber": "6"
+      "buildNumber": "7"
     },
     "android": {
       "adaptiveIcon": {
