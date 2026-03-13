@@ -7,7 +7,6 @@
     "icon": "./assets/icon.png",
     "scheme": "entrevoz",
     "userInterfaceStyle": "dark",
-    "newArchEnabled": true,
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
@@ -28,7 +27,6 @@
           "voip"
         ]
       },
-      "copyright": "© 2026 MachineMind LLC",
       "buildNumber": "4"
     },
     "android": {
@@ -85,7 +83,8 @@
       ]
     ],
     "experiments": {
-      "typedRoutes": true
+      "typedRoutes": true,
+      "newArchEnabled": true
     },
     "extra": {
       "router": {},
