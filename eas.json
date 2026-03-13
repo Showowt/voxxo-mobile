@@ -1,12 +1,35 @@
 {
-  "cli": { "version": ">= 18.3.0" },
+  "cli": {
+    "version": ">= 18.3.0",
+    "appVersionSource": "local"
+  },
   "build": {
     "production": {
-      "env": { "NPM_CONFIG_LEGACY_PEER_DEPS": "true" },
-      "ios": { "simulator": false, "buildConfiguration": "Release" }
+      "env": {
+        "NPM_CONFIG_LEGACY_PEER_DEPS": "true"
+      },
+      "ios": {
+        "simulator": false,
+        "buildConfiguration": "Release",
+        "image": "latest"
+      },
+      "android": {
+        "buildType": "apk"
+      }
     },
     "preview": {
-      "ios": { "simulator": true }
+      "ios": {
+        "simulator": true
+      }
+    }
+  },
+  "submit": {
+    "production": {
+      "ios": {
+        "appleId": "philipmcgill18@gmail.com",
+        "ascAppId": "YOUR_APP_STORE_CONNECT_APP_ID",
+        "appleTeamId": "4C39DXRG9L"
+      }
     }
   }
 }
